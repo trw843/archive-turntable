@@ -11,7 +11,9 @@ body{margin:0;background:#c9c9c9;font-family:var(--mono);color:var(--ink);letter
 .lbl b{display:block;margin-top:2px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .top{display:flex;gap:18px;align-items:center;border-radius:60px;padding:22px 26px}
 .dotr{flex:none;width:64px;height:64px;border-radius:50%;background:var(--red);display:flex;align-items:center;justify-content:center;transition:.3s}
-.dotr svg{width:30px;fill:none;stroke:#fff;stroke-width:2}
+.dotr:after{content:"";width:14px;height:14px;border-radius:50%;background:#fff;opacity:.9}
+.playing .dotr:after{animation:pulse 1.6s ease-in-out infinite}
+@keyframes pulse{50%{transform:scale(.45);opacity:.5}}
 .top h1{margin:0;font-size:.95rem;font-weight:700;text-transform:uppercase;letter-spacing:.14em}
 .top p{margin:4px 0 0;font-size:.82rem;line-height:1.4}
 .idle .dotr{background:#b9b9b9}
@@ -71,14 +73,13 @@ button.on{background:var(--ink);color:#fff}
 .rec:hover .sleeve{transform:scale(.96)}
 .rec h3{margin:8px 4px 0;font-size:.72rem;font-weight:700;line-height:1.3;max-height:2.6em;overflow:hidden;text-transform:uppercase}
 .rec p{margin:2px 4px 0;font-size:.66rem;color:var(--mute)}
-.msg{grid-column:1/-1;text-align:center;padding:26px;color:var(--mute);font-size:.8rem;text-transform:uppercase}
-footer{font-size:.68rem;color:var(--mute);text-align:center;padding:10px}
+.msg{grid-column:1/-1;text-align:center;padding:26px;color:var(--mute);font-size:.8rem;text-transform:uppercase;line-height:1.5}
 a{color:var(--ink)}
 </style></head><body>
 <div class="app"><div class="shell">
 <div class="col" id="deck">
- <div class="card top" id="alert"><div class="dotr"><svg viewBox="0 0 24 24"><path d="M12 3 2 21h20z"/><path d="M12 10v5M12 18v.5"/></svg></div>
-  <div><h1 id="st">Standby</h1><p>Archive Turntable<br>Source: Internet Archive</p></div></div>
+ <div class="card top" id="alert"><div class="dotr"></div>
+  <div><h1 id="st">Standby</h1><p>Archive Turntable</p></div></div>
  <div class="card">
   <div class="lbl">Now playing<b id="sub">Pick a record</b></div>
   <div class="platter"><div class="ring"></div><div class="disc"></div><div class="label" id="label"></div>
@@ -110,23 +111,23 @@ a{color:var(--ink)}
 </div>
 <div class="col">
  <div class="card">
-  <div class="lbl">Genre radio<b id="gname">All genres</b></div>
+  <div class="lbl">Genre radio<b id="gname">All favorites</b></div>
   <div class="chips" id="gchips"></div>
-  <div class="ctrl" style="justify-content:flex-start"><button id="shuf" style="background:var(--ink);color:#fff">&#8646; Shuffle genre</button><button id="auto" class="on">Auto-play: ON</button></div>
+  <div class="ctrl" style="justify-content:flex-start"><button id="shuf" style="background:var(--ink);color:#fff">&#8646; Shuffle</button><button id="auto" class="on">Auto-play: ON</button></div>
  </div>
  <div class="card">
-  <div class="lbl">The crate</div>
-  <form class="bar" id="f" style="margin-top:12px"><input type="search" id="q" placeholder="SEARCH ARTIST OR ALBUM WITHIN GENRE"><button style="background:var(--ink);color:#fff">Go</button></form>
+  <div class="lbl">My favorites crate<b id="count"></b></div>
+  <form class="bar" id="f" style="margin-top:12px"><input type="search" id="q" placeholder="SEARCH MY FAVORITES"><button style="background:var(--ink);color:#fff">Go</button></form>
   <div class="grid" id="grid"></div>
   <div class="ctrl"><button id="more" style="display:none">Load more</button></div>
  </div>
- <footer>Audio streams from <a href="https://archive.org" target="_blank">archive.org</a>. Check each item page for rights.</footer>
 </div>
 </div></div>
 <script>
+const FAV_COLLECTION='fav-trent_williamson517';
 const $=id=>document.getElementById(id);
 const aud=$('aud'),deck=$('deck');
-let page=1,query='',tracks=[],idx=0,item=null,genre='All',autoPlay=true;
+let page=1,query='',tracks=[],idx=0,item=null,genre='All',autoPlay=true,lastId=null;
 const GENRES={
  'All':'',
  'Jazz':'(jazz OR bebop OR "big band" OR swing)',
@@ -141,11 +142,11 @@ const GENRES={
  'Easy Listening':'(lounge OR "easy listening" OR exotica OR "space age pop")',
  'Holiday':'(christmas OR holiday)'
 };
-const BASE='mediatype:audio AND (vinyl OR LP OR "33 rpm" OR "record rip") AND NOT collection:podcasts';
-const FL='&fl[]=identifier&fl[]=title&fl[]=creator&fl[]=year&sort[]='+encodeURIComponent('downloads desc')+'&output=json';
+const BASE='collection:'+FAV_COLLECTION+' AND mediatype:audio';
+const FL='&fl[]=identifier&fl[]=title&fl[]=creator&fl[]=year&output=json';
 $('gchips').innerHTML=Object.keys(GENRES).map(g=>'<button data-g="'+g+'"'+(g==='All'?' class="on"':'')+'>'+g+'</button>').join('');
 function setGenre(g,shuffle){
- genre=g;$('gname').textContent=g==='All'?'All genres':g;
+ genre=g;$('gname').textContent=g==='All'?'All favorites':g;
  [...$('gchips').children].forEach(b=>b.classList.toggle('on',b.dataset.g===g));
  $('q').value='';go(true);if(shuffle)randomRecord();
 }
@@ -157,35 +158,36 @@ $('more').onclick=()=>{page++;go(false)};
 const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const one=v=>Array.isArray(v)?v[0]:v;
 function buildQ(text){
- const parts=[];if(text)parts.push('('+text+')');if(GENRES[genre])parts.push(GENRES[genre]);parts.push(BASE);
+ const parts=[BASE];if(text)parts.push('('+text+')');if(GENRES[genre])parts.push(GENRES[genre]);
  return parts.join(' AND ');
 }
 async function go(reset){
  const grid=$('grid');
  if(reset){page=1;grid.innerHTML='';}
  query=$('q').value.trim();
- const u='https://archive.org/advancedsearch.php?q='+encodeURIComponent(buildQ(query))+FL+'&rows=24&page='+page;
+ const u='https://archive.org/advancedsearch.php?q='+encodeURIComponent(buildQ(query))+FL+'&rows=48&page='+page;
  const m=document.createElement('div');m.className='msg';m.textContent='Loading crate...';grid.appendChild(m);
  try{
   const j=await (await fetch(u)).json();m.remove();
   const docs=j.response.docs;
-  if(!docs.length&&reset)grid.innerHTML='<div class="msg">No records found</div>';
+  if(reset)$('count').textContent=j.response.numFound+' records';
+  if(!docs.length&&reset)grid.innerHTML='<div class="msg">No favorites found'+(genre!=='All'||query?' for this filter. Try All or another genre.':'. Check that the favorites list is public and the collection name is right.')+'</div>';
   docs.forEach(d=>{
    const el=document.createElement('div');el.className='rec';
    el.innerHTML='<div class="sleeve" style="background-image:url(https://archive.org/services/img/'+encodeURIComponent(d.identifier)+')"></div><h3>'+esc(one(d.title))+'</h3><p>'+esc(one(d.creator)||'Unknown artist')+(d.year?' / '+esc(d.year):'')+'</p>';
    el.onclick=()=>load(d);grid.appendChild(el);
   });
-  $('more').style.display=docs.length?'inline-block':'none';
+  $('more').style.display=docs.length>=48?'inline-block':'none';
  }catch(err){m.textContent='Could not reach the Archive: '+err.message}
 }
 async function randomRecord(tries){
  tries=tries||0;
- $('ttl').textContent='Finding a record...';$('sub').textContent=genre==='All'?'All genres':genre;
+ $('ttl').textContent='Finding a record...';$('sub').textContent=genre==='All'?'All favorites':genre;
  try{
-  const pg=tries>1?1:1+Math.floor(Math.random()*6);
-  const u='https://archive.org/advancedsearch.php?q='+encodeURIComponent(buildQ(''))+FL+'&rows=20&page='+pg;
-  const docs=(await (await fetch(u)).json()).response.docs;
-  if(!docs.length){if(tries<3)return randomRecord(tries+1);$('ttl').textContent='No records found';return}
+  const u='https://archive.org/advancedsearch.php?q='+encodeURIComponent(buildQ(''))+FL+'&rows=200&page=1';
+  let docs=(await (await fetch(u)).json()).response.docs;
+  if(!docs.length){$('ttl').textContent='No favorites in this genre';$('sub').textContent='Try another genre';return}
+  if(docs.length>1)docs=docs.filter(d=>d.identifier!==lastId);
   const ok=await load(docs[Math.floor(Math.random()*docs.length)]);
   if(ok===false&&tries<4)return randomRecord(tries+1);
  }catch(e){$('ttl').textContent='Could not reach the Archive';$('sub').textContent=e.message}
@@ -198,6 +200,7 @@ async function load(d){
   const vbr=files.filter(f=>/vbr/i.test(f.format));if(vbr.length)files=vbr;
   let seen={};tracks=files.filter(f=>!seen[f.name]&&(seen[f.name]=1)).sort((a,b)=>(a.name>b.name?1:-1));
   if(!tracks.length){$('ttl').textContent='No playable tracks';$('sub').textContent='No MP3 derivative';return false}
+  lastId=d.identifier;
   item={id:d.identifier,title:one(d.title),artist:one(d.creator)||'Unknown artist'};
   $('label').style.backgroundImage='url(https://archive.org/services/img/'+encodeURIComponent(d.identifier)+')';
   renderTracks();play(0);return true;
